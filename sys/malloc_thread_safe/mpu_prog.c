@@ -3,7 +3,7 @@
 #include "mpu.h"
 #include "cpu.h"
 
-int setMPU(unsigned int baseAddress, unsigned int limitAddress, unsigned int mode){
+int setMPU(unsigned int region, unsigned int baseAddress, unsigned int limitAddress, unsigned int rw, unsigned int ex){
 
 
     // =====================
@@ -46,10 +46,6 @@ int setMPU(unsigned int baseAddress, unsigned int limitAddress, unsigned int mod
     unsigned int RAMLimit = (unsigned int) &Image$$ARM_LIB_STACK$$ZI$$Limit;
     */
 
-    unsigned int ROMAddr = (unsigned int) 0x08000000;
-    unsigned int ROMLimit = (unsigned int) 0x00512000;
-    unsigned int RAMAddr = (unsigned int) 0x20000000;
-    unsigned int RAMLimit = (unsigned int) 0xffff;
     // ============
     // Set region 0
     // ============
@@ -72,15 +68,11 @@ int setMPU(unsigned int baseAddress, unsigned int limitAddress, unsigned int mod
     ));
 
     // Error occurred within MPU region setting
-    ARM_MPU_SetRegion(0UL,
-      ARM_MPU_RBAR(0x20000f40UL, ARM_MPU_SH_NON, 1UL, 0UL, 1UL),  /* Non-shareable, read/write, non-privileged, execute-never */
-      ARM_MPU_RLAR(0x20000f48UL, 0UL)                             /* 1MB memory block using Attr 0 */
+    ARM_MPU_SetRegion(region,
+      ARM_MPU_RBAR(baseAddress, ARM_MPU_SH_NON, rw, 0UL, ex),  /* Non-shareable, read/write, non-privileged, execute-never */
+      ARM_MPU_RLAR(limitAddress, 0UL)                             /* 1MB memory block using Attr 0 */
     );
 
-    ARM_MPU_SetRegion(1UL,
-      ARM_MPU_RBAR(0x08000000UL, ARM_MPU_SH_NON, 0UL, 0UL, 0UL),  /* Non-shareable, read/write, non-privileged, execute-never */
-      ARM_MPU_RLAR(0x08FFFFFFUL, 0UL)                             /* 1MB memory block using Attr 0 */
-    );
     // ============
     // Set region 1
     // ============
