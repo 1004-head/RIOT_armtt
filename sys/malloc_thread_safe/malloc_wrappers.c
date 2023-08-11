@@ -30,7 +30,7 @@
  * mpu set header file
  */
 #include "mpu_prog.h"
-#include "mpu_def.h"
+#include "mpu_defs.h"
 
 extern void *__real_malloc(size_t size);
 extern void __real_free(void *ptr);
@@ -68,8 +68,8 @@ struct zerofat_regioninfo_s
   void *freeptr;
   void *endptr;
   void *accessptr;
-}
-typedef struct zerofat_regioninfo_s *lowfat_regioninfo_t;
+};
+typedef struct zerofat_regioninfo_s *zerofat_regioninfo_t;
 
 struct zerofat_regioninfo_s ZEROFAT_REGION_INFO[4];
 
@@ -93,11 +93,11 @@ bool zerofat_init(void)
   {
     uint8_t *heapptr = 0x20002000 + (HEAPSIZE/4)*i; //zerofat heep ptr
     uint8_t *startptr = 0x20002000 + (HEAPSIZE/4)*i; //zerofat region start ptr
-    zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i//zerofat region info
+    zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->freelist = NULL;
     info->freeptr = startptr;
-    info->endptr = heapptr + heapsize/4; //region size
-    info->accessptr = //zerofat region ptr
+    info->endptr = heapptr + HEAPSIZE/4; //region size
+    //info->accessptr = //zerofat region ptr
     setMPU(i+1, heapptr, heapptr+HEAPSIZE, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
   }
   zerofat_malloc_inited = true;
@@ -113,8 +113,8 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     if(!zerofat_malloc_inited)
       zerofat_init();
     
-    size_t alloc_size = //zerofat alloc region size
-    zerofat_regioninfo_t info = //zerofat region info
+    size_t alloc_size = 8;//zerofat alloc region size
+    zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[0]; //zerofat region info
     void *ptr;
 
     uinttxtptr_t pc;
@@ -154,13 +154,28 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
 void __attribute__((used)) __wrap_free(void *ptr)
 {
+    if (ptr == NULL)
+      return;
+    if(!zerofat_is_ptr(ptr))
+    {
+      __real_free(ptr);
+      return;
+    }
+
+    size_t alloc_size = 8;
+    zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[0];
+
     if (IS_USED(MODULE_MALLOC_TRACING)) {
         uinttxtptr_t pc = cpu_get_caller_pc();
         printf("free(%p) @0x%" PRIxTXTPTR ")\n", ptr, pc);
     }
     assert(!irq_is_in());
     mutex_lock(&_lock);
-    __real_free(ptr);
+
+    zerofat_freelist_t newfreelist = (zerofat_freelist_t)ptr;
+    zerofat_freelist_t oldfreelist = info->freelist;
+    newfreelist->next = oldfreelist;
+    info->freelist = newfreelist;
     mutex_unlock(&_lock);
 }
 
