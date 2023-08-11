@@ -89,6 +89,7 @@ void init_MPU(){
 bool zerofat_init(void)
 {
   init_MPU();
+  printf("MPU Initializing is done\n");
   for(size_t i=0; i<4; i++)
   {
     uint8_t *heapptr = 0x20002000 + (HEAPSIZE/4)*i; //zerofat heep ptr
@@ -101,6 +102,7 @@ bool zerofat_init(void)
     setMPU(i+1, heapptr, heapptr+HEAPSIZE, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
   }
   zerofat_malloc_inited = true;
+  printf("Zerofat Initializing is done\n");
 
   return true;
 }
@@ -143,7 +145,7 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     info->freeptr = freeptr;
 
     ptr = __real_malloc(size);
-    printf("ptr is %p\n", ptr);
+    printf("zerofat ptr is %p\n", ptr);
     mutex_unlock(&_lock);
     if (IS_USED(MODULE_MALLOC_TRACING)) {
         printf("malloc(%u) @ 0x%" PRIxTXTPTR " returned %p\n",
@@ -154,13 +156,18 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
 void __attribute__((used)) __wrap_free(void *ptr)
 {
-    if (ptr == NULL)
+    if (ptr == NULL){
+      printf("ptr is NULL\n");
       return;
+    }
+
+    /*
     if(!zerofat_is_ptr(ptr))
     {
       __real_free(ptr);
       return;
     }
+    */
 
     size_t alloc_size = 8;
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[0];
@@ -177,6 +184,8 @@ void __attribute__((used)) __wrap_free(void *ptr)
     newfreelist->next = oldfreelist;
     info->freelist = newfreelist;
     mutex_unlock(&_lock);
+
+    printf("zerofat ptr free is done\n");
 }
 
 void * __attribute__((used)) __wrap_calloc(size_t nmemb, size_t size)
