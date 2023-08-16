@@ -112,7 +112,7 @@ bool zerofat_init(void)
       info->freeptr = startptr - SIZE_TABLE[i];
       info->endptr = startptr - HEAPSIZE/4;
     }
-    setMPU(i, heapptr, heapptr+HEAPSIZE/4, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+    setMPU(i, heapptr, heapptr+HEAPSIZE/4-1, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
     printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr);
   }
   zerofat_malloc_inited = true;
