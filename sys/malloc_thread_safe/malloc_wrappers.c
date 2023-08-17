@@ -51,9 +51,9 @@ static unsigned int STACKLIMIT = 0x2003E7F;
 static unsigned int PERIPHADDRESS = 0x40000000;
 static unsigned int PERIPHLIMIT = 0xE00FFFFF;
 
-unsigned int HEAPSIZE = 0x3C600;
+unsigned int HEAPSIZE = 0x3B600;
 
-size_t SIZE_TABLE[7] = {32, 64, 128, 256, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
+size_t SIZE_TABLE[7] = {0x20, 0x100, 0x1000, 0x4000, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
 
 /*
  * zerofat data structure
@@ -80,7 +80,6 @@ struct zerofat_regioninfo_s ZEROFAT_REGION_INFO[4];
  * initialize mpu region
  */
 void init_MPU(){
-  for(int i=4; i<7; i++) printf("size[%d] = %ld\n", i, SIZE_TABLE[i]);
   setMPU(4UL, ROMADDRESS, ROMLIMIT, ARM_MPU_RO, ARM_MPU_EXEC); //ROM set region 5
   setMPU(5UL, DATAADDRESS, DATALIMIT, ARM_MPU_RW, ARM_MPU_XN); //data, bss set region 6
   setMPU(6UL, STACKADDRESS, STACKLIMIT, ARM_MPU_RW, ARM_MPU_XN); //stack set region 7
@@ -93,11 +92,11 @@ void init_MPU(){
 bool zerofat_init(void)
 {
   init_MPU();
-  printf("MPU Initializing is done\n\n");
+  printf("\nMPU Initializing is done\n\n");
   for(uint8_t i=0; i<4; i++)
   {
-    uint8_t *heapptr = 0x20002000 + (HEAPSIZE/4)*i; //zerofat heep ptr
-    uint8_t *startptr = 0x20002000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
+    uint8_t *heapptr = 0x20003000 + (HEAPSIZE/4)*i; //zerofat heep ptr
+    uint8_t *startptr = 0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->freelist = NULL;
     //info->freeptr = startptr; //zerofat can allocate ptr
@@ -139,6 +138,20 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 {
     if(!zerofat_malloc_inited)
       zerofat_init();
+
+    uinttxtptr_t pc;
+    if(IS_USED(MODULE_MALLOC_TRACING)){
+      pc = cpu_get_calloer_pc();
+    }
+    assert(!irq_is_in());
+
+    if(size > SIZE_TABLE[3])
+    {
+      mutex_lock(&_lock);
+      void *ptr = __real_malloc(size);
+      mutex_unlock(&_lock);
+      return ptr;
+    }
     
     uint8_t idx = get_alloc_idx(size); //zerofat allocate region index
     size_t alloc_size = SIZE_TABLE[idx]; //zerofat allocate region size
@@ -146,13 +159,8 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     printf("zerofat region idx : %d, alloc size : %d\n", idx, alloc_size);
     void *ptr;
 
-    uinttxtptr_t pc;
-    if (IS_USED(MODULE_MALLOC_TRACING)) {
-        pc = cpu_get_caller_pc();
-    }
-    assert(!irq_is_in());
     mutex_lock(&_lock);
-    
+
     zerofat_freelist_t freelist = info->freelist;
     if(freelist != NULL)
     {
@@ -163,40 +171,37 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     }
 
     ptr = info->freeptr;
-    printf("alloc freeptr : %p\n", ptr);
     void *freeptr;
     if(idx%2 == 0)
     {
       freeptr = (uint8_t *)ptr + alloc_size;
-      printf("freeptr : %p\n", freeptr);
       if(freeptr > info->endptr){
-        size_t expand_size = 512;
+        size_t expand_size = 0x800;
         zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx+1];
         void *endptr = info->endptr + expand_size;
         info->endptr = endptr;
         neighbor_info->endptr = endptr;
-        setMPU(idx, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx+1, neighbor_info->endptr, neighbor_info->baseptr, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx, info->baseptr, info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx+1, neighbor_info->endptr, neighbor_info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
       }
     }
     else
     {
       freeptr = (uint8_t *)ptr - alloc_size;
-      printf("freeptr : %p\n", freeptr);
       if(freeptr < info->endptr)
       {
-        size_t expand_size = 512;
+        size_t expand_size = 0x800;
         zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx-1];
         void *endptr = info->endptr - expand_size;
         info->endptr = endptr;
         neighbor_info->endptr = endptr;
-        setMPU(idx, info->endptr, info->baseptr, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx-1, neighbor_info->baseptr, neighbor_info->endptr, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx, info->endptr, info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx-1, neighbor_info->baseptr, neighbor_info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
       }
     }
     info->freeptr = freeptr;
 
-    printf("zerofat ptr is %p\n", ptr);
+    printf("zerofat ptr is %p\n\n", ptr);
     mutex_unlock(&_lock);
     if (IS_USED(MODULE_MALLOC_TRACING)) {
         printf("malloc(%u) @ 0x%" PRIxTXTPTR " returned %p\n",
@@ -207,6 +212,7 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
 uint8_t get_free_idx(void *ptr)
 {
+  bool legacy_check = false;
   for(int i=0; i<4; i++){
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[i];
     void *base = info->baseptr;
@@ -214,10 +220,14 @@ uint8_t get_free_idx(void *ptr)
     if(i%2==0)
     {
       if(ptr >= base && ptr <= end) return i;
+      else legacy_check = true;
     }else{
       if(ptr >= end && ptr <= base) return i;
+      else legacy_check = true;
     }
   }
+
+  if(legacy_check) return 9;
 }
 
 void __attribute__((used)) __wrap_free(void *ptr)
@@ -237,7 +247,6 @@ void __attribute__((used)) __wrap_free(void *ptr)
 
     uint8_t idx = get_free_idx(ptr);
     printf("idx of ptr %p = %d\n", ptr, idx);
-    zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[idx];
 
     if (IS_USED(MODULE_MALLOC_TRACING)) {
         uinttxtptr_t pc = cpu_get_caller_pc();
@@ -246,6 +255,14 @@ void __attribute__((used)) __wrap_free(void *ptr)
     assert(!irq_is_in());
     mutex_lock(&_lock);
 
+    if(idx == 9)
+    {
+      __real_free(ptr);
+      mutex_unlock(&_lock);
+      return;
+    }
+
+    zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[idx];
     zerofat_freelist_t newfreelist = (zerofat_freelist_t)ptr;
     zerofat_freelist_t oldfreelist = info->freelist;
     printf("new freelist : %p, oldfreelist : %p\n", newfreelist, oldfreelist);
