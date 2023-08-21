@@ -53,7 +53,7 @@ static unsigned int PERIPHLIMIT = 0xE00FFFFF;
 
 unsigned int HEAPSIZE = 0x3B600;
 
-size_t SIZE_TABLE[7] = {0x20, 0x100, 0x1000, 0x4000, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
+size_t SIZE_TABLE[7] = {0, 0, 0, 0, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
 
 /*
  * zerofat data structure
@@ -65,8 +65,16 @@ struct zerofat_freelist_s
 };
 typedef struct zerofat_freelist_s *zerofat_freelist_t;
 
+struct zerofat_alloclist_s
+{
+  uintptr_t _reserved;
+  struct zerofat_alloclist_s *next;
+};
+typedef struct zerofat_alloclist_s *zerofat_alloclist_t;
+
 struct zerofat_regioninfo_s
 {
+  zerofat_alloclist_t alloclist;
   zerofat_freelist_t freelist;
   void *freeptr;
   void *baseptr;
@@ -95,23 +103,17 @@ bool zerofat_init(void)
   printf("\nMPU Initializing is done\n\n");
   for(uint8_t i=0; i<4; i++)
   {
-    uint8_t *heapptr = 0x20003000 + (HEAPSIZE/4)*i; //zerofat heep ptr
-    uint8_t *startptr = 0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
+    SIZE_TABLE[i] = 0;
+    printf("%d\n", i);
+    void *heapptr = 0x20003000 +((HEAPSIZE/4)*i); //zerofat heep ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
+    info->alloclist = NULL;
     info->freelist = NULL;
-    //info->freeptr = startptr; //zerofat can allocate ptr
-    info->baseptr = startptr; //zerofat region start ptr
-    if(i%2==0)
-    {
-      info->freeptr = startptr;
-      info->endptr = startptr + HEAPSIZE/4; //zerofat region end ptr == slider
-    }
-    else
-    {
-      info->freeptr = startptr - SIZE_TABLE[i];
-      info->endptr = startptr - HEAPSIZE/4;
-    }
-    setMPU(i, heapptr, heapptr+HEAPSIZE/4-1, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+    info->baseptr = heapptr; //zerofat region start baseptr
+    info->freeptr = heapptr;
+    info->endptr = heapptr + (HEAPSIZE/4) - 1; //zerofat region end ptr == slider
+    setMPU(i, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+    printf("%p - %p = %p\n", info->endptr, info->baseptr, info->endptr - info->baseptr);
     printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr);
   }
   zerofat_malloc_inited = true;
@@ -121,14 +123,45 @@ bool zerofat_init(void)
 }
 
 /*
+ * modify size table and region info
+ */
+void modify_region(size_t change_size)
+{
+  size_t tmp = 0;
+  for(int i=3; i>0; i--){
+    tmp = SIZE_TABLE[i];
+    SIZE_TABLE[i] = change_size;
+    change_size = tmp;
+
+    zerofat_regioninfo_t newregion = &ZEROFAT_REGION_INFO[i];
+    zerofat_alloclist_t allocnode = newregion->alloclist;
+    while(allocnode != NULL){
+      realloc(allocnode, SIZE_TABLE[i]);
+    }
+  }
+}
+
+/*
  * get real allocation size in zerofat
  */
 uint8_t get_alloc_idx(size_t size)
 {
+  for(int i = 0; i<4; i++){
+    if(SIZE_TABLE[i] == 0){
+      SIZE_TABLE[i] = size;
+      return i;
+    }
+  }
+
   if(SIZE_TABLE[0] >= size) return 0;
   else if(SIZE_TABLE[1] >= size) return 1;
-  else if (SIZE_TABLE[2] >= size) return 2;
-  else return 3;
+  else if(SIZE_TABLE[2] >= size) return 2;
+  else if(SIZE_TABLE[3] >= size) return 3;
+  else{
+    modify_region(size);
+    for(int i=0; i<4; i++) printf("size table idx %d = %d\n", i, SIZE_TABLE[i]);
+    return 3;
+  }
 }
 
 /*
@@ -168,16 +201,20 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
     /*
      * 자 만들어야 하는걸 보자고
-     * 1. size가 들어오면 적절한 2의 지수승 사이즈에 매핑
-     * 2. 결정된 사이즈를 사이즈 테이블에 저장
-     * 3. 만약 사이즈 테이블이 채워져 있으면 사이즈테이블에서 적절한 사이즈로 설정
-     * 4. 사이즈 테이블에 있는 최대 크기보다 크게 들어오면 테이블값 재조정 및 영역 재할당
-     * 5. 영역이 다 차게 되면 인접한 영역의 프리리스트를 가져와서 영역 확장
+     * 1. size가 들어오면 적절한 2의 지수승 사이즈에 매핑 "해결"
+     * 2. 결정된 사이즈를 사이즈 테이블에 저장 "해결"
+     * 3. 만약 사이즈 테이블이 채워져 있으면 사이즈테이블에서 적절한 사이즈로 설정 "해결"
+     * 4. 사이즈 테이블에 있는 최대 크기보다 크게 들어오면 테이블값 재조정 및 영역 재할당 "해결"
+     * 5. 영역이 다 차게 되면 인접한 영역의 프리리스트를 가져와서 영역 확장 - TODO
+     * 6. 할당 방식과 메모리 구조 변경 (슬라이더 제거, 순차적으로 할당 등) "해결"
+     * 7. 초기화 코드 수정"해결"
+     * 8. 사이즈테이블 변경 후 해당 사이즈에 맞게 포인터 재할당 - TODO
+     * 9. realloc 함수 작성 - "해결"
      */
 
-    size_t smallest_po2 = get_smallest_po2(size);
-    printf("smallest po2 value is %d\n", smallest_po2);
-    
+    size_t po2_size = get_smallest_po2(size);
+    printf("smallest po2 value is %d\n", po2_size);    
+
     uint8_t idx = get_alloc_idx(size); //zerofat allocate region index
     size_t alloc_size = SIZE_TABLE[idx]; //zerofat allocate region size
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[idx]; //zerofat region info
@@ -197,34 +234,31 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
     ptr = info->freeptr;
     void *freeptr;
-    if(idx%2 == 0)
-    {
-      freeptr = (uint8_t *)ptr + alloc_size;
-      if(freeptr > info->endptr){
-        size_t expand_size = 0x800;
-        zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx+1];
-        void *endptr = info->endptr + expand_size;
-        info->endptr = endptr;
-        neighbor_info->endptr = endptr;
-        setMPU(idx, info->baseptr, info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx+1, neighbor_info->endptr, neighbor_info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
-      }
-    }
-    else
-    {
-      freeptr = (uint8_t *)ptr - alloc_size;
-      if(freeptr < info->endptr)
-      {
-        size_t expand_size = 0x800;
-        zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx-1];
-        void *endptr = info->endptr - expand_size;
-        info->endptr = endptr;
-        neighbor_info->endptr = endptr;
-        setMPU(idx, info->endptr, info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx-1, neighbor_info->baseptr, neighbor_info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
-      }
+    freeptr = (uint8_t *)ptr + alloc_size;
+    if(freeptr > info->endptr){
+      
+      zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx+1];
+      zerofat_freelist_t neighbor_freelist = neighbor_info->freelist;
+
+      void *endptr = NULL;
+      if(neighbor_freelist == NULL) endptr = neighbor_info->baseptr + SIZE_TABLE[idx+1] - 1;
+      // 여기서 이제 기존에 idx+1 region에 할당되어 있던 포인터들을 다 한 칸씩 밀어서 옮겨줘야 함
+      else if(neighbor_freelist+1 == NULL) endptr = (void *) &neighbor_freelist[0] + SIZE_TABLE[idx+1] - 1;
+      else endptr = (void *)&neighbor_freelist[1] - 1;
+      neighbor_info->freelist = neighbor_freelist->next;
+
+      info->endptr = endptr;
+      neighbor_info->baseptr = endptr+1;
+      setMPU(idx, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN);
+      setMPU(idx+1, neighbor_info->baseptr, neighbor_info->endptr, ARM_MPU_RW, ARM_MPU_XN);
     }
     info->freeptr = freeptr;
+
+    zerofat_alloclist_t newalloclist = (zerofat_alloclist_t) ptr;
+    zerofat_alloclist_t oldalloclist = info->alloclist;
+    newalloclist->next = oldalloclist;
+    info->alloclist = newalloclist;
+    printf("newalloclist : %p, oldalloclist : %p\n", newalloclist, oldalloclist);
 
     printf("zerofat ptr is %p\n\n", ptr);
     mutex_unlock(&_lock);
@@ -237,22 +271,12 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
 uint8_t get_free_idx(void *ptr)
 {
-  bool legacy_check = false;
   for(int i=0; i<4; i++){
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[i];
     void *base = info->baseptr;
     void *end = info->endptr;
-    if(i%2==0)
-    {
-      if(ptr >= base && ptr <= end) return i;
-      else legacy_check = true;
-    }else{
-      if(ptr >= end && ptr <= base) return i;
-      else legacy_check = true;
-    }
+    if(ptr >= base && ptr <= end) return i;
   }
-
-  if(legacy_check) return 9;
 }
 
 void __attribute__((used)) __wrap_free(void *ptr)
@@ -279,13 +303,6 @@ void __attribute__((used)) __wrap_free(void *ptr)
     }
     assert(!irq_is_in());
     mutex_lock(&_lock);
-
-    if(idx == 9)
-    {
-      __real_free(ptr);
-      mutex_unlock(&_lock);
-      return;
-    }
 
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[idx];
     zerofat_freelist_t newfreelist = (zerofat_freelist_t)ptr;
@@ -342,14 +359,24 @@ void * __attribute__((used))__wrap_realloc(void *ptr, size_t size)
 
     assert(!irq_is_in());
     mutex_lock(&_lock);
-    void *new = __real_realloc(ptr, size);
+
+    if(ptr == NULL || size == 0) return __wrap_malloc(size);
+
+    void *newptr = __wrap_malloc(size);
+    if(newptr == NULL) return NULL;
+
+    size_t cpy_size;
+    size_t idx = get_alloc_idx(ptr);
+    size_t ptr_size = SIZE_TABLE[idx];
+    memcpy(newptr, ptr, cpy_size);
+    __wrap_free(ptr);
     mutex_unlock(&_lock);
 
     if (IS_USED(MODULE_MALLOC_TRACING)) {
         printf("realloc(%p, %u) @0x%" PRIxTXTPTR " returned %p\n",
-               ptr, (unsigned)size, pc, new);
+               ptr, (unsigned)size, pc, newptr);
     }
-    return new;
+    return newptr;
 }
 
 /** @} */
