@@ -132,6 +132,27 @@ uint8_t get_alloc_idx(size_t size)
 }
 
 /*
+ * get smallest power of 2
+ */
+size_t get_smallest_po2(size_t size)
+{
+  if(size <= 0) return 1;
+  size_t origin = size;
+
+  size_t msb = 0;
+  while(size > 0){
+    size >>= 1;
+    msb++;
+  }
+
+  if((1 << (msb - 1)) == origin){
+    return origin;
+  }
+
+  return 1 << msb;
+}
+
+/*
  * zerofat allocator malloc
  */
 void __attribute__((used)) *__wrap_malloc(size_t size)
@@ -145,13 +166,17 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     }
     assert(!irq_is_in());
 
-    if(size > SIZE_TABLE[3])
-    {
-      mutex_lock(&_lock);
-      void *ptr = __real_malloc(size);
-      mutex_unlock(&_lock);
-      return ptr;
-    }
+    /*
+     * 자 만들어야 하는걸 보자고
+     * 1. size가 들어오면 적절한 2의 지수승 사이즈에 매핑
+     * 2. 결정된 사이즈를 사이즈 테이블에 저장
+     * 3. 만약 사이즈 테이블이 채워져 있으면 사이즈테이블에서 적절한 사이즈로 설정
+     * 4. 사이즈 테이블에 있는 최대 크기보다 크게 들어오면 테이블값 재조정 및 영역 재할당
+     * 5. 영역이 다 차게 되면 인접한 영역의 프리리스트를 가져와서 영역 확장
+     */
+
+    size_t smallest_po2 = get_smallest_po2(size);
+    printf("smallest po2 value is %d\n", smallest_po2);
     
     uint8_t idx = get_alloc_idx(size); //zerofat allocate region index
     size_t alloc_size = SIZE_TABLE[idx]; //zerofat allocate region size
