@@ -104,7 +104,6 @@ bool zerofat_init(void)
   for(uint8_t i=0; i<4; i++)
   {
     SIZE_TABLE[i] = 0;
-    printf("%d\n", i);
     void *heapptr = 0x20003000 +((HEAPSIZE/4)*i); //zerofat heep ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->alloclist = NULL;
@@ -113,7 +112,6 @@ bool zerofat_init(void)
     info->freeptr = heapptr;
     info->endptr = heapptr + (HEAPSIZE/4) - 1; //zerofat region end ptr == slider
     setMPU(i, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
-    printf("%p - %p = %p\n", info->endptr, info->baseptr, info->endptr - info->baseptr);
     printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr);
   }
   zerofat_malloc_inited = true;
@@ -135,8 +133,14 @@ void modify_region(size_t change_size)
 
     zerofat_regioninfo_t newregion = &ZEROFAT_REGION_INFO[i];
     zerofat_alloclist_t allocnode = newregion->alloclist;
+    zerofat_freelist_t freenode = newregion->freelist;
     while(allocnode != NULL){
       realloc(allocnode, SIZE_TABLE[i]);
+      allocnode = allocnode->next;
+    }
+    while(freenode != NULL){
+      realloc(freenode, SIZE_TABLE[i]);
+      freenode = freenode->next;
     }
   }
 }
@@ -215,7 +219,7 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     size_t po2_size = get_smallest_po2(size);
     printf("smallest po2 value is %d\n", po2_size);    
 
-    uint8_t idx = get_alloc_idx(size); //zerofat allocate region index
+    uint8_t idx = get_alloc_idx(po2_size); //zerofat allocate region index
     size_t alloc_size = SIZE_TABLE[idx]; //zerofat allocate region size
     zerofat_regioninfo_t info = &ZEROFAT_REGION_INFO[idx]; //zerofat region info
     printf("zerofat region idx : %d, alloc size : %d\n", idx, alloc_size);
@@ -241,8 +245,14 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
       zerofat_freelist_t neighbor_freelist = neighbor_info->freelist;
 
       void *endptr = NULL;
-      if(neighbor_freelist == NULL) endptr = neighbor_info->baseptr + SIZE_TABLE[idx+1] - 1;
-      // 여기서 이제 기존에 idx+1 region에 할당되어 있던 포인터들을 다 한 칸씩 밀어서 옮겨줘야 함
+      if(neighbor_freelist == NULL){
+        endptr = neighbor_info->baseptr + SIZE_TABLE[idx+1] - 1;
+        zerofat_alloclist_t allocnode = neighbor_info->alloclist;
+        while(allocnode != NULL){
+          realloc(allocnode, SIZE_TABLE[idx+1]);
+          allocnode = allocnode->next;
+        }
+      }
       else if(neighbor_freelist+1 == NULL) endptr = (void *) &neighbor_freelist[0] + SIZE_TABLE[idx+1] - 1;
       else endptr = (void *)&neighbor_freelist[1] - 1;
       neighbor_info->freelist = neighbor_freelist->next;

@@ -36,7 +36,7 @@ int main(void)
     char *data4 = (char *)malloc(20);
     char *data5 = (char *)malloc(50);
     char *data6 = (char *)malloc(100);
-    //char *data7 = (char *)malloc(300);
+    char *data7 = (char *)malloc(300);
 
     printf("data : %p\n", data);
     printf("data1 : %p\n", data1);
@@ -45,7 +45,7 @@ int main(void)
     printf("data4 : %p\n", data4);
     printf("data5 : %p\n", data5);
     printf("data6 : %p\n", data6);
-    //printf("data7 : %p\n", data7);
+    printf("data7 : %p\n", data7);
 
     free(data);
     free(data1);
@@ -54,7 +54,7 @@ int main(void)
     free(data4);
     free(data5);
     free(data6);
-    //free(data7);
+    free(data7);
 
     return 0;
 }
