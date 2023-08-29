@@ -125,24 +125,24 @@ bool zerofat_init(void)
  */
 void modify_region(size_t change_size)
 {
-  size_t tmp = 0;
-  for(int i=3; i>0; i--){
-    tmp = SIZE_TABLE[i];
-    SIZE_TABLE[i] = change_size;
-    change_size = tmp;
+    SIZE_TABLE[3] = change_size;
 
-    zerofat_regioninfo_t newregion = &ZEROFAT_REGION_INFO[i];
+    zerofat_regioninfo_t newregion = &ZEROFAT_REGION_INFO[3];
     zerofat_alloclist_t allocnode = newregion->alloclist;
-    zerofat_freelist_t freenode = newregion->freelist;
+    
+    size_t alloc_n = 0;
     while(allocnode != NULL){
-      realloc(allocnode, SIZE_TABLE[i]);
+      free(allocnode);
+      //realloc(allocnode, SIZE_TABLE[i]);
       allocnode = allocnode->next;
+      alloc_n++;
     }
-    while(freenode != NULL){
-      realloc(freenode, SIZE_TABLE[i]);
-      freenode = freenode->next;
+    newregion->freelist = NULL;
+
+    printf("%p\n", newregion->alloclist);
+    for(size_t j=0; j<alloc_n; j++){
+      malloc(SIZE_TABLE[3]);
     }
-  }
 }
 
 /*
@@ -213,6 +213,7 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
      * 6. 할당 방식과 메모리 구조 변경 (슬라이더 제거, 순차적으로 할당 등) "해결"
      * 7. 초기화 코드 수정"해결"
      * 8. 사이즈테이블 변경 후 해당 사이즈에 맞게 포인터 재할당 - TODO
+    printf("%d\n", i);
      * 9. realloc 함수 작성 - "해결"
      */
 
@@ -322,6 +323,15 @@ void __attribute__((used)) __wrap_free(void *ptr)
     newfreelist->next = oldfreelist;
     info->freelist = newfreelist;
     printf("freelist ptr : %p\n", info->freelist);
+    
+    zerofat_alloclist_t oldalloclist = info->alloclist;
+    while(oldalloclist != NULL){
+      if((zerofat_alloclist_t)ptr == oldalloclist->next){
+        oldalloclist->next = oldalloclist->next->next;
+        break;
+      }
+      oldalloclist = oldalloclist->next;
+    }
     mutex_unlock(&_lock);
 
     printf("zerofat ptr free is done\n\n");
@@ -389,4 +399,3 @@ void * __attribute__((used))__wrap_realloc(void *ptr, size_t size)
     return newptr;
 }
 
-/** @} */

@@ -33,10 +33,13 @@ int main(void)
     char *data1 = (char *)malloc(64);
     char *data2 = (char *)malloc(128);
     char *data3 = (char *)malloc(256);
+    snprintf(data3, 15, "hithisisdata\n");
+    printf("%s", data3);
     char *data4 = (char *)malloc(20);
     char *data5 = (char *)malloc(50);
     char *data6 = (char *)malloc(100);
     char *data7 = (char *)malloc(300);
+    printf("%s", data3);
 
     printf("data : %p\n", data);
     printf("data1 : %p\n", data1);
@@ -55,6 +58,8 @@ int main(void)
     free(data5);
     free(data6);
     free(data7);
+
+    printf("done!!\n");
 
     return 0;
 }
