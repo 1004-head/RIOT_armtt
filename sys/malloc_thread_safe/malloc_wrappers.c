@@ -138,6 +138,20 @@ void modify_region(size_t change_size)
       alloc_n++;
     }
     newregion->freelist = NULL;
+    zerofat_alloclist_t alloc = newregion->alloclist;
+    zerofat_freelist_t free = newregion->freelist;
+
+    while(alloc != NULL){
+	    printf("alloc: %p -> ", alloc);
+	    alloc = alloc->next;
+    }
+    printf("\n\n");
+    while(free != NULL){
+	    printf("free: %p -> ", free);
+	    free = free->next;
+    }
+    printf("\n\n");
+
 
     printf("%p\n", newregion->alloclist);
     for(size_t j=0; j<alloc_n; j++){
