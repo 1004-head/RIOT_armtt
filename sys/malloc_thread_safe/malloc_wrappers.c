@@ -104,14 +104,14 @@ bool zerofat_init(void)
   for(uint8_t i=0; i<4; i++)
   {
     SIZE_TABLE[i] = 0;
-    void *heapptr = 0x20003000 +((HEAPSIZE/4)*i); //zerofat heep ptr
+    void *heapptr = (void *)0x20003000 +((HEAPSIZE/4)*i); //zerofat heep ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->alloclist = NULL;
     info->freelist = NULL;
     info->baseptr = heapptr; //zerofat region start baseptr
     info->freeptr = heapptr;
     info->endptr = heapptr + (HEAPSIZE/4) - 1; //zerofat region end ptr == slider
-    setMPU(i, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+    setMPU(i, (unsigned int)info->baseptr, (unsigned int)info->endptr, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
     printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr);
   }
   zerofat_malloc_inited = true;
@@ -274,8 +274,8 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
 
       info->endptr = endptr;
       neighbor_info->baseptr = endptr+1;
-      setMPU(idx, info->baseptr, info->endptr, ARM_MPU_RW, ARM_MPU_XN);
-      setMPU(idx+1, neighbor_info->baseptr, neighbor_info->endptr, ARM_MPU_RW, ARM_MPU_XN);
+      setMPU(idx, (unsigned int)info->baseptr, (unsigned int)info->endptr, ARM_MPU_RW, ARM_MPU_XN);
+      setMPU(idx+1, (unsigned int)neighbor_info->baseptr, (unsigned int)neighbor_info->endptr, ARM_MPU_RW, ARM_MPU_XN);
     }
     info->freeptr = freeptr;
 
@@ -400,7 +400,7 @@ void * __attribute__((used))__wrap_realloc(void *ptr, size_t size)
     if(newptr == NULL) return NULL;
 
     size_t cpy_size;
-    size_t idx = get_alloc_idx(ptr);
+    size_t idx = get_free_idx(ptr);
     size_t ptr_size = SIZE_TABLE[idx];
     memcpy(newptr, ptr, cpy_size);
     __wrap_free(ptr);
