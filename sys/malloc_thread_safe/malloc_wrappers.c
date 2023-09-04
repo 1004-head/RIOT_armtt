@@ -51,9 +51,9 @@ static unsigned int STACKLIMIT = 0x2003E7F;
 static unsigned int PERIPHADDRESS = 0x40000000;
 static unsigned int PERIPHLIMIT = 0xE00FFFFF;
 
-unsigned int HEAPSIZE = 0x3C600;
+unsigned int HEAPSIZE = 0x3B600;
 
-size_t SIZE_TABLE[7] = {32, 64, 128, 256, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
+size_t SIZE_TABLE[7] = {0x10, 0x100, 0x1000, 0x4000, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
 
 /*
  * zerofat data structure
@@ -94,17 +94,25 @@ bool zerofat_init(void)
 {
   init_MPU();
   printf("MPU Initializing is done\n\n");
+  for(int i=0; i<4; i++) printf("SIZE TABLE : %d\n", SIZE_TABLE[i]);
   for(uint8_t i=0; i<4; i++)
   {
-    size_t *heapptr = (size_t*) 0x20003000 + (HEAPSIZE/4)*i; //zerofat heep ptr
-    size_t *startptr = (size_t*) 0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
+    void *startptr = 0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->freelist = NULL;
-    info->baseptr = heapptr; //zerofat region start baseptr
-    info->freeptr = startptr;
-    info->endptr = heapptr + (HEAPSIZE/4) - 1; //zerofat region end ptr == slider
-    setMPU(i, (unsigned int)info->baseptr, (unsigned int)info->endptr, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
-    printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr);
+    if(i%2==0){
+        info->freeptr = startptr;
+        info->baseptr = startptr; //zerofat region start baseptr
+        info->endptr = startptr + (HEAPSIZE/4); //zerofat region end ptr == slider
+        setMPU(i, info->baseptr, info->endptr-1, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+        printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->baseptr, info->endptr-1);
+    }else{
+        info->freeptr = startptr - SIZE_TABLE[i];
+        info->baseptr = startptr; //zerofat region start baseptr
+        info->endptr = startptr - (HEAPSIZE/4);
+        setMPU(i, info->endptr, info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN); //heap set region 1, 2, 3, 4
+        printf("idx-%d: freeptr-%p, baseptr-%p, endptr-%p\n", i, info->freeptr, info->endptr, info->baseptr-1);
+    }
   }
   zerofat_malloc_inited = true;
   printf("Zerofat Initializing is done\n\n");
@@ -159,21 +167,21 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
     if(idx%2 == 0)
     {
       freeptr = (uint8_t *)ptr + alloc_size;
-      printf("freeptr : %p\n", freeptr);
+      printf("freeptr : %p\n\n", freeptr);
       if(freeptr > info->endptr){
         size_t expand_size = 512;
         zerofat_regioninfo_t neighbor_info = &ZEROFAT_REGION_INFO[idx+1];
         void *endptr = info->endptr + expand_size;
         info->endptr = endptr;
         neighbor_info->endptr = endptr;
-        setMPU(idx, (unsigned int)info->baseptr, (unsigned int)info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx+1, (unsigned int)neighbor_info->endptr, (unsigned int)neighbor_info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx, info->baseptr, info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx+1, neighbor_info->endptr, neighbor_info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
       }
     }
     else
     {
       freeptr = (uint8_t *)ptr - alloc_size;
-      printf("freeptr : %p\n", freeptr);
+      printf("freeptr : %p\n\n", freeptr);
       if(freeptr < info->endptr)
       {
         size_t expand_size = 512;
@@ -181,8 +189,8 @@ void __attribute__((used)) *__wrap_malloc(size_t size)
         void *endptr = info->endptr - expand_size;
         info->endptr = endptr;
         neighbor_info->endptr = endptr;
-        setMPU(idx, (unsigned int)info->endptr, (unsigned int)info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
-        setMPU(idx-1, (unsigned int)neighbor_info->baseptr, (unsigned int)neighbor_info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx, info->endptr, info->baseptr-1, ARM_MPU_RW, ARM_MPU_XN);
+        setMPU(idx-1, neighbor_info->baseptr, neighbor_info->endptr-1, ARM_MPU_RW, ARM_MPU_XN);
       }
     }
     info->freeptr = freeptr;
@@ -292,7 +300,7 @@ void * __attribute__((used))__wrap_realloc(void *ptr, size_t size)
     assert(!irq_is_in());
     mutex_lock(&_lock);
 
-    if(ptr == NULL || size == 0) return __wrap_malloc(size);
+    if(ptr == NULL || size == 0) return malloc(size);
 
     void *newptr = malloc(size);
     if(newptr == NULL) return NULL;
