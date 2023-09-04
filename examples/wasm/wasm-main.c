@@ -40,5 +40,6 @@ int main(void)
     printf("ret = %d\n", ret);
 
     iwasm_runtime_destroy();
-
+    
+    printf("DONE!!!!!\n");
 }

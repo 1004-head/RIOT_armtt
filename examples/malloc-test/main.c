@@ -34,7 +34,6 @@ int main(void)
     char *data2 = (char *)malloc(128);
     char *data3 = (char *)malloc(256);
     snprintf(data3, 15, "hithisisdata\n");
-    printf("%s", data3);
     char *data4 = (char *)malloc(20);
     char *data5 = (char *)malloc(50);
     char *data6 = (char *)malloc(100);
