@@ -32,9 +32,15 @@
 #include "mpu_prog.h"
 #include "mpu_defs.h"
 
-extern void *__real_malloc(size_t size);
-extern void __real_free(void *ptr);
-extern void *__real_realloc(void *ptr, size_t size);
+/*
+ * size table setting header file 
+ */
+#include "set_sizetable.h"
+
+void *__wrap_malloc(size_t size);
+void __wrap_free(void *ptr);
+void *__wrap_calloc(size_t nmemb, size_t size);
+void *__wrap_realloc(void *ptr, size_t size);
 
 static mutex_t _lock;
 bool zerofat_malloc_inited = false; //checking allocator is initiated
@@ -50,10 +56,6 @@ static unsigned int STACKADDRESS = 0x2003C80;
 static unsigned int STACKLIMIT = 0x2003E7F;
 static unsigned int PERIPHADDRESS = 0x40000000;
 static unsigned int PERIPHLIMIT = 0xE00FFFFF;
-
-unsigned int HEAPSIZE = 0x3B600;
-
-size_t SIZE_TABLE[7] = {0x10, 0x100, 0x1000, 0x4000, 0x7FFFF, 0x1FFF, 0xA00FFFFF};
 
 /*
  * zerofat data structure
@@ -81,10 +83,10 @@ struct zerofat_regioninfo_s ZEROFAT_REGION_INFO[4];
  */
 void init_MPU(){
   for(int i=4; i<7; i++) printf("size[%d] = %ld\n", i, SIZE_TABLE[i]);
-  setMPU(4UL, ROMADDRESS, ROMLIMIT, ARM_MPU_RO, ARM_MPU_EXEC); //ROM set region 5
-  setMPU(5UL, DATAADDRESS, DATALIMIT, ARM_MPU_RW, ARM_MPU_XN); //data, bss set region 6
-  setMPU(6UL, STACKADDRESS, STACKLIMIT, ARM_MPU_RW, ARM_MPU_XN); //stack set region 7
-  setMPU(7UL, PERIPHADDRESS, PERIPHLIMIT, ARM_MPU_RW, ARM_MPU_XN); //peripheral set region 8
+  setMPU(4UL, (void *)ROMADDRESS, (void *)ROMLIMIT, ARM_MPU_RO, ARM_MPU_EXEC); //ROM set region 5
+  setMPU(5UL, (void *)DATAADDRESS, (void *)DATALIMIT, ARM_MPU_RW, ARM_MPU_XN); //data, bss set region 6
+  setMPU(6UL, (void *)STACKADDRESS, (void *)STACKLIMIT, ARM_MPU_RW, ARM_MPU_XN); //stack set region 7
+  setMPU(7UL, (void *)PERIPHADDRESS, (void *)PERIPHLIMIT, ARM_MPU_RW, ARM_MPU_XN); //peripheral set region 8
 }
 
 /*
@@ -97,7 +99,7 @@ bool zerofat_init(void)
   for(int i=0; i<4; i++) printf("SIZE TABLE : %d\n", SIZE_TABLE[i]);
   for(uint8_t i=0; i<4; i++)
   {
-    void *startptr = 0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
+    void *startptr = (void *)0x20003000 + (HEAPSIZE/2)*((i+1)/2); //zerofat region start ptr
     zerofat_regioninfo_t info = ZEROFAT_REGION_INFO + i; //zerofat region info
     info->freelist = NULL;
     if(i%2==0){
@@ -276,7 +278,7 @@ void * __attribute__((used)) __wrap_calloc(size_t nmemb, size_t size)
     }
 
     mutex_lock(&_lock);
-    void *res = malloc(total_size);
+    void *res = __wrap_malloc(total_size);
     mutex_unlock(&_lock);
     if (res) {
         memset(res, 0, total_size);
@@ -302,14 +304,14 @@ void * __attribute__((used))__wrap_realloc(void *ptr, size_t size)
 
     if(ptr == NULL || size == 0) return malloc(size);
 
-    void *newptr = malloc(size);
+    void *newptr = __wrap_malloc(size);
     if(newptr == NULL) return NULL;
 
     size_t cpy_size;
     size_t idx = get_free_idx(ptr);
     size_t ptr_size = SIZE_TABLE[idx];
     memcpy(newptr, ptr, cpy_size);
-    free(ptr);
+    __wrap_free(ptr);
     mutex_unlock(&_lock);
 
     if (IS_USED(MODULE_MALLOC_TRACING)) {

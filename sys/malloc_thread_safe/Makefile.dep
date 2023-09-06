@@ -1,1 +1,2 @@
 USEMODULE += mpu_prog
+USEMODULE += set_sizetable

@@ -3,8 +3,10 @@
 #include "mpu.h"
 #include "cpu.h"
 
-int setMPU(unsigned int region, unsigned int baseAddress, unsigned int limitAddress, unsigned int rw, unsigned int ex){
+int setMPU(unsigned int region, void* baseAddress, void* limitAddress, unsigned int rw, unsigned int ex){
 
+    unsigned int base = (unsigned int) baseAddress;
+    unsigned int limit = (unsigned int) limitAddress;
 
     // =====================
     // Set memory attributes in Memory Attribute Indirection Registers
@@ -69,8 +71,8 @@ int setMPU(unsigned int region, unsigned int baseAddress, unsigned int limitAddr
 
     // Error occurred within MPU region setting
     ARM_MPU_SetRegion(region,
-      ARM_MPU_RBAR(baseAddress, ARM_MPU_SH_NON, rw, 0UL, ex),  /* Non-shareable, read/write, non-privileged, execute-never */
-      ARM_MPU_RLAR(limitAddress, 0UL)                             /* 1MB memory block using Attr 0 */
+      ARM_MPU_RBAR(base, ARM_MPU_SH_NON, rw, 0UL, ex),  /* Non-shareable, read/write, non-privileged, execute-never */
+      ARM_MPU_RLAR(limit, 0UL)                             /* 1MB memory block using Attr 0 */
     );
 
     // ============
